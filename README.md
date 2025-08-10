@@ -1,66 +1,37 @@
-# Automated Roll Call (Face Recognition)
+# Automated Roll Call
 
-Cross‑platform Python app (macOS + Windows) that performs automated roll call from a webcam using modern face detection + embeddings (InsightFace), with a simple PySide6 UI.
+This is a Python application that uses facial recognition for an automated roll call system. It's built with PySide6 for the GUI and InsightFace for the core facial recognition logic.
 
 ## Features
-- Start/End roll call buttons.
-- Recognizes students by comparing to embeddings built from images in `student_images/`.
-- Speaks each recognized student's name (`pyttsx3`) and says **"Unauthorized"** for unknown faces.
-- End-of-session view: Present, Absent, and Unauthorized lists with thumbnails.
-- Stores results in `results/session_YYYY-mm-dd_HHMMSS.json` and unauthorized snapshots in `results/unauthorized/`.
+
+- Live camera feed for real-time recognition.
+- Roster building from a folder of student images.
+- Identifies present, absent, and unauthorized individuals.
+- Saves session results to a JSON file.
+- Audio feedback for recognized and unauthorized persons.
 
 ## Setup
 
-1) Create a virtual environment and install dependencies:
+1.  **Clone the repository:**
+    ```bash
+    git clone <your-repository-url>
+    cd automated-roll-call
+    ```
 
+2.  **Create a virtual environment and install dependencies:**
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+    pip install -r requirements.txt
+    ```
+    *(Note: You will need to create a `requirements.txt` file. See below.)*
+
+3.  **Add student images:**
+    Place images of students in the `student_images` directory. The filename (without extension) will be used as the student's name (e.g., `John_Doe.jpg`).
+
+## Usage
+
+Run the application with:
 ```bash
-python -m venv .venv
-# macOS
-source .venv/bin/activate
-# Windows (PowerShell)
-# .\.venv\Scripts\Activate.ps1
-
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-2) Put one or more photos per student in `student_images/`.
-   - Filenames should be the name to announce, e.g. `Ada Lovelace.jpg`, `Ada_Lovelace_2.png`.
-   - Multiple images for the same student are supported; embeddings are averaged.
-
-3) Run the app:
-
-```bash
-python app.py
-```
-
-> On first run, the app will build `roster/embeddings.npy`, `roster/names.json` and thumbnails in `roster/thumbs/`.
-> Subsequent runs will load these caches and start faster.
-
-### macOS camera permissions
-If the camera doesn't show or you never get a camera permission prompt, run from Terminal first. For distribution as a standalone app, sign/notarize the bundle and include `NSCameraUsageDescription` in the app's Info.plist so macOS prompts for access.
-
-### Tuning
-- Similarity threshold default: **0.35**. If you see false matches, raise it (e.g. 0.40). If it misses matches, lower it (e.g. 0.30).
-- Lighting at the doorway matters a lot. Try to keep the camera at head height with even lighting.
-
-### Packaging (optional)
-- Windows: PyInstaller (one-folder).
-- macOS: `pyside6-deploy` or PyInstaller, with codesigning/notarization for camera permissions.
-
-## Folder Structure
-```
-rollcall_app/
-  app.py
-  README.md
-  requirements.txt
-  student_images/
-  roster/
-    embeddings.npy
-    names.json
-    thumbs/
-  results/
-    session_*.json
-    unauthorized/
-  assets/
+python3 app.py
 ```
