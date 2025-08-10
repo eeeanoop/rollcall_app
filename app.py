@@ -1,3 +1,4 @@
+
 import sys
 import os
 import time
@@ -39,10 +40,22 @@ STUDENT_IMAGES_DIR = BASE_DIR / "student_images"
 RESULTS_DIR = BASE_DIR / "results"
 UNAUTH_DIR = RESULTS_DIR / "unauthorized"
 
-# Defaults
-SIM_THRESHOLD = 0.35   # cosine similarity threshold (tune for your setup)
+# =========================
+# Tuning parameters
+# =========================
+SIM_THRESHOLD = 0.35   # cosine similarity threshold for a positive match (higher = stricter)
 DETECT_SIZE = (640, 640)
 FRAME_FPS = 18
+
+# Make "Unauthorized" much stricter to cut down noise:
+UNKNOWN_STRICT_SIM_MAX = 0.20     # only call unauthorized if best similarity <= this (very low confidence it's anyone in roster)
+DET_CONF_MIN = 0.60               # require strong face detection confidence
+MIN_FACE_AREA = 8000              # pixels; ignore tiny far-away faces
+UNAUTH_CONFIRM_FRAMES = 6         # require at least N consecutive frames before calling unauthorized
+UNAUTH_MATCH_DIST = 64.0          # px; how close centers must be to keep the same unknown track
+UNAUTH_TRACK_MAX_GAP_SEC = 1.0    # seconds; drop stale unknown tracks
+
+# Legacy debounce is now secondary (track confirmation is primary)
 UNAUTH_DEBOUNCE_SEC = 2.0
 
 
@@ -222,6 +235,66 @@ class Recognizer:
         self.analyzer.prepare(ctx_id=0, det_size=det_size)
 
 
+class UnknownTracker:
+    """
+    Very lightweight tracker for unknown faces.
+    Tracks by face center proximity and counts consecutive frames.
+    """
+    def __init__(self):
+        self._next_id = 1
+        self.tracks = {}  # id -> dict(cx, cy, count, last_ts)
+
+    def _match(self, cx, cy):
+        best_id, best_dist = None, 1e9
+        for tid, t in self.tracks.items():
+            dx = t["cx"] - cx
+            dy = t["cy"] - cy
+            d = math.hypot(dx, dy)
+            if d < best_dist:
+                best_dist, best_id = d, tid
+        if best_dist <= UNAUTH_MATCH_DIST:
+            return best_id
+        return None
+
+    def update(self, detections):
+        """
+        detections: list of dict(cx, cy, ts)
+        Returns: list of track dicts that hit the confirmation threshold this update.
+        """
+        now = time.time()
+
+        # Decay old tracks
+        stale = [tid for tid, t in self.tracks.items() if (now - t["last_ts"]) > UNAUTH_TRACK_MAX_GAP_SEC]
+        for tid in stale:
+            self.tracks.pop(tid, None)
+
+        confirmed = []
+
+        for d in detections:
+            cx, cy, ts = d["cx"], d["cy"], d["ts"]
+            tid = self._match(cx, cy)
+            if tid is None:
+                tid = self._next_id
+                self._next_id += 1
+                self.tracks[tid] = {"cx": cx, "cy": cy, "count": 0, "last_ts": ts}
+
+            t = self.tracks[tid]
+            # update track
+            t["cx"] = 0.6 * t["cx"] + 0.4 * cx
+            t["cy"] = 0.6 * t["cy"] + 0.4 * cy
+            t["last_ts"] = ts
+            t["count"] += 1
+
+            if t["count"] == UNAUTH_CONFIRM_FRAMES:
+                confirmed.append({"id": tid, "cx": t["cx"], "cy": t["cy"]})
+
+        # Remove confirmed tracks so we don't double-fire too quickly
+        for c in confirmed:
+            self.tracks.pop(c["id"], None)
+
+        return confirmed
+
+
 class CameraWorker(QThread):
     frame_ready = Signal(np.ndarray)                          # BGR frame for display
     recognized_name = Signal(str, str, float)                 # name, thumb_path, score
@@ -240,6 +313,9 @@ class CameraWorker(QThread):
         # Simple debounce for recognized names to avoid repeated announcements
         self._seen_names_recent = {}  # name -> last time announced
 
+        # Unknown tracking
+        self.unk_tracker = UnknownTracker()
+
     def stop(self):
         self._running = False
 
@@ -248,6 +324,24 @@ class CameraWorker(QThread):
         sims = self.roster.embeddings @ emb  # (N,)
         idx = int(np.argmax(sims))
         return idx, float(sims[idx])
+
+    def _should_flag_unknown(self, face, frame_shape, best_sim):
+        """
+        Apply strict gating to decide if a face is a strong 'unknown' candidate.
+        This does NOT emit yet; it only says whether to accumulate toward confirmation.
+        """
+        h, w = frame_shape[:2]
+        x1, y1, x2, y2 = face.bbox
+        area = max(0, int((x2 - x1) * (y2 - y1)))
+        det_conf = getattr(face, "det_score", 1.0)
+
+        if area < MIN_FACE_AREA:
+            return False
+        if det_conf < DET_CONF_MIN:
+            return False
+        if best_sim > UNKNOWN_STRICT_SIM_MAX:  # too similar to someone; not confident enough to call unauthorized
+            return False
+        return True
 
     def run(self):
         cap = cv2.VideoCapture(self.camera_index)
@@ -277,6 +371,8 @@ class CameraWorker(QThread):
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             faces = self.recognizer.analyzer.get(rgb)
 
+            unknown_candidates = []  # for tracker
+
             if faces:
                 for f in faces:
                     emb = f.normed_embedding
@@ -293,14 +389,27 @@ class CameraWorker(QThread):
                             # Prepare a small face thumbnail for UI (derived from current frame)
                             crop = crop_with_margin(frame, f.bbox, margin=0.2)
                             face_thumb = resize_square(crop, 128)
-                            # Save? Not necessary for recognized; display from roster thumb for uniformity
+                            # Use roster thumb for uniformity in the Present list
                             self.recognized_name.emit(name, self.roster.name_to_thumb.get(name, ""), score)
                     else:
-                        # Unauthorized logic with debounce
+                        # Strong unknown gating; only accumulate if we are VERY sure it's not someone in the roster
+                        if self._should_flag_unknown(f, frame.shape, score):
+                            x1, y1, x2, y2 = f.bbox
+                            cx = 0.5 * (x1 + x2)
+                            cy = 0.5 * (y1 + y2)
+                            unknown_candidates.append({"cx": cx, "cy": cy, "ts": time.time(), "bbox": f.bbox})
+
+                # Update unknown tracker and emit only on confirmation
+                if unknown_candidates:
+                    confirmed = self.unk_tracker.update(unknown_candidates)
+                    for _c in confirmed:
+                        # Debounce final emission so we don't spam TTS if multiple confirmations overlap
                         now = time.time()
                         if now - self._last_unauth_ts > UNAUTH_DEBOUNCE_SEC:
                             self._last_unauth_ts = now
-                            crop = crop_with_margin(frame, f.bbox, margin=0.2)
+                            # Use the first candidate bbox for a snapshot (approximate)
+                            f0 = unknown_candidates[0]
+                            crop = crop_with_margin(frame, f0["bbox"], margin=0.2)
                             face_thumb = resize_square(crop, 128)
                             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             self.unauthorized_seen.emit(ts, face_thumb)
@@ -506,7 +615,7 @@ class MainWindow(QWidget):
         item.setIcon(QIcon(tmp_thumb))
         self.tab_unauth.addItem(item)
 
-        self.status.setText("Unauthorized person detected.")
+        self.status.setText("Unauthorized person confirmed.")
         speak_async("Unauthorized")
 
     @Slot(str)
