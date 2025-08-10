@@ -14,7 +14,7 @@ This is a Python application that uses facial recognition for an automated roll 
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repository-url>
+    git clone git@github.com:eeeanoop/rollcall_app.git
     cd automated-roll-call
     ```
 

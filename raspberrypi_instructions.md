@@ -70,10 +70,9 @@ Now, let's download the RollCall application code from its repository.
 
 *   In your Terminal, run:
     ```bash
-    git clone <your-repository-url>
+    git clone git@github.com:eeeanoop/rollcall_app.git
     cd automated-roll-call
     ```
-    *(Note: Replace `<your-repository-url>` with the actual URL to the project's Git repository.)*
 
 ### 5. Set Up the Python Environment
 We'll create a "virtual environment" to keep our project's Python packages separate from the system's. This is a best practice to avoid conflicts.
