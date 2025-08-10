@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+/venv/
+
+# Generated data directories
+# These contain generated thumbnails, embeddings, and session results.
+# It's best to regenerate them rather than store them in version control.
+/roster/
+/results/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+
+student_images

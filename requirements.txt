@@ -1,0 +1,11 @@
+# Core computer vision + recognition
+insightface>=0.7.3
+onnxruntime>=1.17.0
+opencv-python>=4.9.0
+
+# UI
+PySide6>=6.7.0
+
+# Misc
+numpy>=1.24.0
+pyttsx3>=2.90
