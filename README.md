@@ -24,8 +24,6 @@ This is a Python application that uses facial recognition for an automated roll 
     source venv/bin/activate  # On Windows use `venv\Scripts\activate`
     pip install -r requirements.txt
     ```
-    *(Note: You will need to create a `requirements.txt` file. See below.)*
-
 3.  **Add student images:**
     Place images of students in the `student_images` directory. The filename (without extension) will be used as the student's name (e.g., `John_Doe.jpg`).
 
